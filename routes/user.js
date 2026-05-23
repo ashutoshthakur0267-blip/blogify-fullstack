@@ -1,13 +1,8 @@
 const { Router } = require("express");
-const { v4: uuidv4 } = require("uuid");
 
 const router = Router();
 
 const User = require("../models/user");
-
-const {
-  sendVerificationEmail,
-} = require("../services/emailService");
 
 // ==================== Render Pages ====================
 
@@ -34,27 +29,6 @@ router.post("/signin", async (req, res) => {
 
     const { email, password } = req.body;
 
-    // Find user first
-    const user = await User.findOne({ email });
-
-    if (!user) {
-
-      return res.render("signin", {
-        user: req.user || null,
-        error: "User not found",
-      });
-    }
-
-    // Check email verification
-    if (!user.isVerified) {
-
-      return res.render("signin", {
-        user: req.user || null,
-        error: "Please verify your email first",
-      });
-    }
-
-    // Generate token
     const token =
       await User.matchPasswordAndGenerateToken(
         email,
@@ -85,28 +59,13 @@ router.post("/signup", async (req, res) => {
 
     const { fullname, email, password } = req.body;
 
-    // Generate verification token
-    const verificationToken = uuidv4();
-
-    // Create user
     await User.create({
       fullname,
       email,
       password,
-
-      verificationToken,
-      isVerified: false,
     });
 
-    // Send verification email
-    sendVerificationEmail(
-      email,
-      verificationToken
-    );
-
-    return res.send(
-      "Verification email sent ✅ Please check your inbox."
-    );
+    return res.redirect("/");
 
   } catch (err) {
 
@@ -116,42 +75,6 @@ router.post("/signup", async (req, res) => {
       user: req.user || null,
       error: "Error during signup. Try again.",
     });
-  }
-});
-
-// ==================== VERIFY EMAIL ====================
-router.get("/verify/:token", async (req, res) => {
-
-  try {
-
-    const user = await User.findOne({
-      verificationToken: req.params.token,
-    });
-
-    if (!user) {
-
-      return res.send(
-        "Invalid verification link ❌"
-      );
-    }
-
-    user.isVerified = true;
-
-    user.verificationToken = "";
-
-    await user.save();
-
-    return res.send(
-      "Email verified successfully ✅"
-    );
-
-  } catch (err) {
-
-    console.log(err);
-
-    return res.send(
-      "Verification failed ❌"
-    );
   }
 });
 
