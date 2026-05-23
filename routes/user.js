@@ -99,7 +99,7 @@ router.post("/signup", async (req, res) => {
     });
 
     // Send verification email
-    await sendVerificationEmail(
+    sendVerificationEmail(
       email,
       verificationToken
     );
