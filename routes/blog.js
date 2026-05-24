@@ -1,10 +1,9 @@
 const { Router } = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 
 const Blog = require("../models/blog");
 const Comment = require("../models/comment");
+
+const upload = require("../middlewares/upload");
 
 const {
   generateSummary,
@@ -15,29 +14,9 @@ const {
 
 const router = Router();
 
-// ==================== Multer Storage =====================
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    if (!req.user) return cb(new Error("Unauthorized"));
-
-    const uploadPath = path.resolve(`./public/uploads/${req.user._id}`);
-
-    fs.mkdirSync(uploadPath, { recursive: true });
-
-    cb(null, uploadPath);
-  },
-
-  filename: function (req, file, cb) {
-    const fileName = `${Date.now()}-${file.originalname}`;
-
-    cb(null, fileName);
-  },
-});
-
-const upload = multer({ storage });
-
 // ==================== Add New Blog Page =====================
 router.get("/add-new", (req, res) => {
+
   if (!req.user) return res.redirect("/user/signin");
 
   return res.render("addBlog", {
@@ -61,44 +40,53 @@ router.get("/test-ai", async (req, res) => {
 // ==================== Create Blog =====================
 router.post("/", upload.single("coverImage"), async (req, res) => {
 
-  if (!req.user) return res.redirect("/user/signin");
+  try {
 
-  const { title, body, category } = req.body;
+    if (!req.user) return res.redirect("/user/signin");
 
-  // ✅ Generate AI Summary
-  const summary = await generateSummary(body);
+    const { title, body, category } = req.body;
 
-  const tags = await generateTags(body);
+    // ✅ Generate AI Summary
+    const summary = await generateSummary(body);
 
-  const aiTitles = await generateTitles(body);
+    const tags = await generateTags(body);
 
-  const grammarSuggestion = await grammarCorrection(body);
+    const aiTitles = await generateTitles(body);
 
-  // ⭐ Reading Time
-  const wordCount = body.trim().split(/\s+/).length;
+    const grammarSuggestion = await grammarCorrection(body);
 
-  const readingTime = Math.ceil(wordCount / 200);
+    // ⭐ Reading Time
+    const wordCount = body.trim().split(/\s+/).length;
 
-  // ⭐ Cover Image
-  const coverImageURL = req.file
-    ? `/uploads/${req.user._id}/${req.file.filename}`
-    : null;
+    const readingTime = Math.ceil(wordCount / 200);
 
-  // ✅ Create Blog
-  const blog = await Blog.create({
-    title,
-    body,
-    summary,
-    tags,
-    aiTitles,
-    grammarSuggestion,
-    createdBy: req.user._id,
-    coverImageURL,
-    readingTime,
-    category,
-  });
+    // ⭐ Cloudinary Image URL
+    const coverImageURL = req.file
+      ? req.file.path
+      : null;
 
-  return res.redirect(`/blog/${blog.id}`);
+    // ✅ Create Blog
+    const blog = await Blog.create({
+      title,
+      body,
+      summary,
+      tags,
+      aiTitles,
+      grammarSuggestion,
+      createdBy: req.user._id,
+      coverImageURL,
+      readingTime,
+      category,
+    });
+
+    return res.redirect(`/blog/${blog.id}`);
+
+  } catch (err) {
+
+    console.error("❌ Blog Create Error:", err);
+
+    return res.send("Error creating blog");
+  }
 });
 
 // ==================== View Blog =====================
@@ -165,39 +153,48 @@ router.get("/edit/:id", async (req, res) => {
 // ==================== Edit Blog =====================
 router.post("/edit/:id", upload.single("coverImage"), async (req, res) => {
 
-  if (!req.user) return res.redirect("/user/signin");
+  try {
 
-  const blog = await Blog.findById(req.params.id);
+    if (!req.user) return res.redirect("/user/signin");
 
-  if (!blog) {
-    return res.status(404).send("Blog not found");
+    const blog = await Blog.findById(req.params.id);
+
+    if (!blog) {
+      return res.status(404).send("Blog not found");
+    }
+
+    if (blog.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).send("Unauthorized");
+    }
+
+    blog.title = req.body.title;
+    blog.body = req.body.body;
+    blog.category = req.body.category;
+
+    // ✅ Regenerate AI Summary on Edit
+    blog.summary = await generateSummary(req.body.body);
+
+    // ⭐ Recalculate Reading Time
+    const wordCount = req.body.body.trim().split(/\s+/).length;
+
+    blog.readingTime = Math.ceil(wordCount / 200);
+
+    // ⭐ Update Cover Image
+    if (req.file) {
+
+      blog.coverImageURL = req.file.path;
+    }
+
+    await blog.save();
+
+    return res.redirect(`/blog/${blog._id}`);
+
+  } catch (err) {
+
+    console.error("❌ Blog Edit Error:", err);
+
+    return res.send("Error editing blog");
   }
-
-  if (blog.createdBy.toString() !== req.user._id.toString()) {
-    return res.status(403).send("Unauthorized");
-  }
-
-  blog.title = req.body.title;
-  blog.body = req.body.body;
-  blog.category = req.body.category;
-
-  // ✅ Regenerate AI Summary on Edit
-  blog.summary = await generateSummary(req.body.body);
-
-  // ⭐ Recalculate Reading Time
-  const wordCount = req.body.body.trim().split(/\s+/).length;
-
-  blog.readingTime = Math.ceil(wordCount / 200);
-
-  // ⭐ Update Cover Image
-  if (req.file) {
-    blog.coverImageURL =
-      `/uploads/${req.user._id}/${req.file.filename}`;
-  }
-
-  await blog.save();
-
-  return res.redirect(`/blog/${blog._id}`);
 });
 
 // ==================== Delete Blog =====================
